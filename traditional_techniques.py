@@ -1,13 +1,13 @@
 import pandas as pd
 from itertools import product
-from rapidfuzz import fuzz, process
 from sklearn.metrics import precision_score, recall_score, f1_score
+from rapidfuzz import fuzz, process
+from rapidfuzz.distance import JaroWinkler
+from globals import SIMILARITY_THRESHOLD, PATH_BASEA, PATH_BASEB, TRUE_MATCHES  
 
-# Configuración de umbral de similitud
-SIMILARITY_THRESHOLD = 0.75
 
-path_baseA = 'BaseA_cleaned.csv'
-path_baseB= 'BaseB_cleaned.csv'
+path_baseA = PATH_BASEA
+path_baseB= PATH_BASEB
 
 
 def load_data(file1, file2):
@@ -17,6 +17,24 @@ def load_data(file1, file2):
     
     return df1, df2
 
+# Apply blocking to reduce the number of comparisons
+def apply_blocking(df1, df2):
+    # Initialize list to store blocked pairs
+    df1['Block'] = df1['Name'].str[0]
+    df2['Block'] = df2['Name'].str[0]
+
+    blocked_pairs = []
+    for block in df1['Block'].unique():
+        df1_block = df1[df1['Block'] == block]
+        df2_block = df2[df2['Block'] == block]
+
+        for idx1, row1 in df1_block.iterrows():
+            for idx2, row2 in df2_block.iterrows():
+                blocked_pairs.append((idx1, idx2))
+
+    return blocked_pairs
+
+
 # compare words with Jaro-Winkler similarity
 def jaro_similarity(str1, str2):
     # Asegurarse de que los valores sean cadenas y no sean None
@@ -25,53 +43,54 @@ def jaro_similarity(str1, str2):
         return 0.0
     else: 
         value = fuzz.WRatio(str(str1), str(str2)) / 100.0
-    return value
 
-# generate all pairs
-def generate_pairs(df1, df2, relevant_attributes):
-    if relevant_attributes is None:
-        pairs = pd.DataFrame(list(product(df1.to_dict('records'), df2.to_dict('records'))), columns=['record1', 'record2'])
-    else:
-        df1_relevant = df1[relevant_attributes]
-        df2_relevant = df2[relevant_attributes]
-        pairs = pd.DataFrame(list(product(df1_relevant.to_dict('records'), df2_relevant.to_dict('records'))), columns=['record1', 'record2'])
-    return pairs
+        #value = JaroWinkler.similarity(str(str1), str(str2)) / 100.0
+    return value
 
 
 # Aplicar similitudes a pares necesarios
-def apply_similarity(pairs):
-    #print(pairs)
-    pairs['is_match'] = 0
-    for index, row in pairs.iterrows():
-        record1 = row['record1']
-        record2 = row['record2']
-        ##print(f"Record1: {record1}, Record2: {record2}")
-        #print(record1)
-        similarity = jaro_similarity(record1, record2)
-        #print(f"Similarity: {similarity}")
+def apply_similarity(pairs, df1, df2):
+    result = []
+
+    # Iterating over all pairs
+    for pair in pairs:
+        index1, index2 = pair
+
+        # Obtain the records
+        record1 = df1.loc[index1]
+        record1_str = record1.to_dict()
+        record1_str = str(record1_str)
+
+        record2 = df2.loc[index2]
+        record2_str = record2.to_dict()
+        record2_str = str(record2_str)
+
+        # Calculate the similarity
+        similarity = jaro_similarity(record1_str, record2_str)  
         if similarity >= SIMILARITY_THRESHOLD:
-            #print(f"Match found! Similarity: {similarity}")
-            pairs.loc[index, 'is_match'] = 1
-            #next row
-            continue
+            result.append((pair, 1))  # Añadir el par y el valor 1 
+
+    #print(result)
+    result_df = pd.DataFrame(result, columns=['index_pair', 'is_match'])
+    #print(result_df)
+    return result_df
 
     return pairs
 
-# Filtrar resultados con coincidencias altas
-def filter_matches(pairs):
-    matches = pairs[pairs['is_match'] == 1]
-    return matches
 
 # Evaluar precisión, recall y F1-score
-def evaluate_results(num_matches, num_true_matches):
-    # Recall
-    recall = num_true_matches / num_matches
-    if recall > 1:
-        recall = 1
-    # Precision
-    precision = num_matches / num_true_matches
-    # F1-Score
-    f1 = 2 * (precision * recall) / (precision + recall)
+def evaluate_results(matches, true_matches):
+
+    y_true = [
+        1 if (pair[0], pair[1]) in true_matches else 0
+        for pair in matches['index_pair'] # Iterating over the index pairs
+    ]
+    
+    y_pred = [1] * len(matches)
+
+    precision = precision_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred)
 
     return precision, recall, f1
 
@@ -84,30 +103,17 @@ def save_matching_records(matches, file_path):
 
 def main():
     df1, df2 = load_data(path_baseA, path_baseB)
-    #print(df1.head())
-    #print(df2.tail())
+
     
     # Main String Similarity Workflow
-    all_pairs = generate_pairs(df1, df2, None)
-    #print(all_pairs)
-    #print(all_pairs.head())
-    #print(relevant_pairs.tail())
+    blocked_pairs = apply_blocking(df1, df2)
 
-    aplied_all = apply_similarity(all_pairs)  # Comparar por columna 'name'
+
+    aplied_all = apply_similarity(blocked_pairs, df1, df2)  # Comparar por columna 'name'
     print('String Similarity Applied Successfully!')
 
-    matches_all = filter_matches(aplied_all)
-    matches_uniques_a = matches_all.drop_duplicates(subset=['record1'])
 
-    output_file = 'string_similarity_results.txt'
-    print('Matches ALL:' + str(len(matches_all)))
-    print('Matches Unique A:' + str(len(matches_uniques_a)))
-    save_matching_records(matches_uniques_a, output_file)
-
-    
-    
-    num_matches_all = len(matches_uniques_a)
-    precision_a, recall_a, f1_a = evaluate_results(num_matches_all, 445)
+    precision_a, recall_a, f1_a = evaluate_results(aplied_all, TRUE_MATCHES)
 
     
     print(f"String All Similarity Results - Precision: {precision_a}, Recall: {recall_a}, F1-Score: {f1_a}")
