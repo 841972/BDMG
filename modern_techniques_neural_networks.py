@@ -109,17 +109,32 @@ def create_model():
     return model
 
 # Evaluar precisión, recall y F1-score
-def evaluate_results(num_matches, num_true_matches):
-    # Recall
-    recall = num_true_matches / num_matches
-    if recall > 1:
-        recall = 1
-    # Precision
-    precision = num_matches / num_true_matches
-    # F1-Score
-    f1 = 2 * (precision * recall) / (precision + recall)
+def evaluate_results(matches, true_matches):
+
+    y_true = [
+        1 if (pair[0], pair[1]) in true_matches else 0
+        for pair in matches['index_pair'] # Iterating over the index pairs
+    ]
+    
+    y_pred = [1] * len(matches)
+
+    precision = precision_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred)
 
     return precision, recall, f1
+
+# def evaluate_results(num_matches, num_true_matches):
+#     # Recall
+#     recall = num_true_matches / num_matches
+#     if recall > 1:
+#         recall = 1
+#     # Precision
+#     precision = num_matches / num_true_matches
+#     # F1-Score
+#     f1 = 2 * (precision * recall) / (precision + recall)
+
+#     return precision, recall, f1
 
 # Crear el DataFrame de pares bloqueados
 pairs_df = pd.DataFrame(blocked_pairs, columns=["Index_A", "Index_B"])
