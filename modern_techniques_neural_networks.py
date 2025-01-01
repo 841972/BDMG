@@ -1,16 +1,22 @@
 import pandas as pd
-#import tensorflow as tf
-print(tf.__version__)
-
-import matplotlib.pyplot as plt
-from sklearn.ensemble import RandomForestClassifier
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import regularizers
+#import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import precision_score, recall_score, f1_score
-from rapidfuzz import fuzz
 #from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from datetime import datetime
 from scikeras.wrappers import KerasClassifier
+from rapidfuzz.distance import JaroWinkler
+from globals import SIMILARITY_THRESHOLD
+from sklearn.utils.class_weight import compute_class_weight
+from imblearn.over_sampling import SMOTE
+
+
+
+
 # Cargar los datasets
 path_baseA = 'BaseA_cleaned.csv'
 path_baseB= 'BaseB_cleaned.csv'
@@ -65,10 +71,10 @@ def compute_features(row):
     phone_match = int(record_a["Phone"] == record_b["Phone"])
 
     # Similitudes de cadenas
-    email_similarity = fuzz.WRatio(record_a["Email"], record_b["Email"])
-    name_similarity = fuzz.WRatio(record_a["Name"], record_b["Name"])
+    email_similarity = JaroWinkler.similarity(record_a["Email"], record_b["Email"])
+    name_similarity = JaroWinkler.similarity(record_a["Name"], record_b["Name"])
 
-    address_similarity = fuzz.WRatio(record_a["Address"], record_b["Address"])
+    address_similarity = JaroWinkler.similarity(record_a["Address"], record_b["Address"])
     
     # Diferencia de fechas
     if pd.notnull(record_a["DOB"]) and pd.notnull(record_b["DOB"]):
@@ -98,11 +104,13 @@ def compute_features(row):
 
 def create_model():
     model = tf.keras.Sequential([
-        tf.keras.layers.Dense(128, activation='relu', input_shape=(X_train.shape[1],)),
-        tf.keras.layers.Dropout(0.3),
-        tf.keras.layers.Dense(64, activation='relu'),
-        tf.keras.layers.Dropout(0.3),
-        tf.keras.layers.Dense(32, activation='relu'),
+        tf.keras.Input(shape=(X_train.shape[1],)),
+        tf.keras.layers.Dense(128, activation='relu', kernel_regularizer=regularizers.l2(0.01)),
+        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.01)),
+        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Dense(32, activation='relu', kernel_regularizer=regularizers.l2(0.01)),
+        tf.keras.layers.Dropout(0.5),
         tf.keras.layers.Dense(1, activation='sigmoid')
     ])
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
@@ -124,17 +132,6 @@ def evaluate_results(matches, true_matches):
 
     return precision, recall, f1
 
-# def evaluate_results(num_matches, num_true_matches):
-#     # Recall
-#     recall = num_true_matches / num_matches
-#     if recall > 1:
-#         recall = 1
-#     # Precision
-#     precision = num_matches / num_true_matches
-#     # F1-Score
-#     f1 = 2 * (precision * recall) / (precision + recall)
-
-#     return precision, recall, f1
 
 # Crear el DataFrame de pares bloqueados
 pairs_df = pd.DataFrame(blocked_pairs, columns=["Index_A", "Index_B"])
@@ -150,28 +147,37 @@ pairs_df[["DOB_Diff", "Transaction_Date_Diff", "Total_Spent_Diff"]] = scaler.fit
 pairs_df["Label"] = [
     1 if base_a.loc[row["Index_A"], "ID"] == base_b.loc[row["Index_B"], "ID"]
     else (1 if base_a.loc[row["Index_A"], "Phone"] == base_b.loc[row["Index_B"], "Phone"] and
-              fuzz.WRatio(base_a.loc[row["Index_A"], "Name"], base_b.loc[row["Index_B"], "Name"]) > 85
+              JaroWinkler.similarity(base_a.loc[row["Index_A"], "Name"], base_b.loc[row["Index_B"], "Name"]) > 85
           else 0)
     for _, row in pairs_df.iterrows()
 ]
 
 
 # Dividir los datos en entrenamiento y prueba
-X = pairs_df.drop(columns=["Index_A", "Index_B", "Label"])  # Elimina columnas que no son características
+X = pairs_df.drop(columns=["Index_A", "Index_B", "Label"]) 
 y = pairs_df["Label"]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.5, random_state=42)
+
+# Compute class weights
+class_weights = compute_class_weight('balanced', classes=np.array([0, 1]), y=y_train)
+print(class_weights)
+
+smote = SMOTE(sampling_strategy='auto', random_state=42)
+X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
+
 
 # Crear el modelo
 model = create_model()
 keras_model = KerasClassifier(model=create_model, epochs=30, batch_size=32, verbose=0)
 
-scores = cross_val_score(keras_model, X, y, cv=5, scoring='f1')
-print(f"Cross-validated F1 scores: {scores}")
-print(f"Mean F1 score: {scores.mean():.2f}")
+#scores = cross_val_score(keras_model, X, y, cv=5, scoring='f1')
+#print(f"Cross-validated F1 scores: {scores}")
+#print(f"Mean F1 score: {scores.mean():.2f}")
 
 history = model.fit(
-    X_train, y_train,
+    X_resampled, y_resampled,
     epochs=30,
     batch_size=32,
     validation_split=0.2,
@@ -181,30 +187,9 @@ history = model.fit(
 
 # Evaluar el modelo
 y_pred_prob = model.predict(X_test)
-y_pred = (y_pred_prob > 0.5).astype(int)
+y_pred = (y_pred_prob > 0.6).astype(int)
 precision = precision_score(y_test, y_pred)
 recall = recall_score(y_test, y_pred)
 f1 = f1_score(y_test, y_pred)
 
 print(f"Precision: {precision:.2f}, Recall: {recall:.2f}, F1-Score: {f1:.2f}")
-
-# Graficar la precisión
-plt.plot(history.history['accuracy'], label='Training Accuracy')
-plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
-plt.title('Model Accuracy Over Epochs')
-plt.xlabel('Epochs')
-plt.ylabel('Accuracy')
-plt.legend()
-plt.show()
-
-# Graficar la pérdida
-plt.plot(history.history['loss'], label='Training Loss')
-plt.plot(history.history['val_loss'], label='Validation Loss')
-plt.title('Model Loss Over Epochs')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.legend()
-plt.show()
-
-#print(X.head())
-#print(y.head())
