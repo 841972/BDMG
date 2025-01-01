@@ -19,6 +19,12 @@ pip install fuzzywuzzy
 REM Install python-Levenshtein
 pip install python-Levenshtein
 
+REM Install scikeras
+pip install scikeras
+
+REM Install tensorflow
+pip install tensorflow
+
 
 
 

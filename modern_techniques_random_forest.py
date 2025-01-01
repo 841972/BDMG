@@ -2,8 +2,9 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_score, recall_score, f1_score
-from rapidfuzz import fuzz
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from rapidfuzz.distance import JaroWinkler
+
 
 # Cargar los datasets
 path_baseA = 'BaseA_cleaned.csv'
@@ -41,8 +42,8 @@ def compute_features(row):
     record_b = base_b.loc[row["Index_B"]]
 
     # Similitudes
-    name_similarity = fuzz.WRatio(record_a["Name"], record_b["Name"])
-    email_similarity = fuzz.WRatio(record_a["Email"], record_b["Email"])
+    name_similarity = JaroWinkler.similarity(record_a["Name"], record_b["Name"])
+    email_similarity = JaroWinkler.similarity(record_a["Email"], record_b["Email"])
 
     id_match = int(record_a["ID"] == record_b["ID"])
     phone_match = int(record_a["Phone"] == record_b["Phone"])

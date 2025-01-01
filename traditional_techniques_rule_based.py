@@ -1,13 +1,13 @@
 import pandas as pd
-from fuzzywuzzy import fuzz
 from sklearn.metrics import precision_score, recall_score, f1_score
+from rapidfuzz.distance import JaroWinkler
 from globals import *
 
 def match_exact(field_a, field_b):
     return field_a == field_b
 
 def match_fuzzy(field_a, field_b, threshold=SIMILARITY_THRESHOLD):
-    similarity_score = fuzz.ratio(field_a, field_b)
+    similarity_score = JaroWinkler.similarity(field_a, field_b)
     return similarity_score >= threshold
 
 # match if field_a is exact match with field_b or field_c is exact match with field_d and field_e is fuzzy match with field_f
@@ -86,7 +86,6 @@ def main():
                 index_machted.append((match, 1))
         else:
             file.write("No matches found.\n")
-        print("No matches found.")
 
     index_machted_df = pd.DataFrame(index_machted, columns=['index_pair', 'is_match'])
     precision_a, recall_a, f1_a = evaluate_results(index_machted_df, TRUE_MATCHES)

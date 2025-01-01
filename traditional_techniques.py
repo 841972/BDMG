@@ -1,7 +1,6 @@
 import pandas as pd
 from itertools import product
 from sklearn.metrics import precision_score, recall_score, f1_score
-from rapidfuzz import fuzz, process
 from rapidfuzz.distance import JaroWinkler
 from globals import SIMILARITY_THRESHOLD, PATH_BASEA, PATH_BASEB, TRUE_MATCHES  
 
@@ -42,9 +41,7 @@ def jaro_similarity(str1, str2):
         #print('None values found!')
         return 0.0
     else: 
-        value = fuzz.WRatio(str(str1), str(str2)) / 100.0
-
-        #value = JaroWinkler.similarity(str(str1), str(str2)) / 100.0
+        value = JaroWinkler.similarity(str(str1), str(str2)) 
     return value
 
 
